@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi import UploadFile, File
 from backend.whisper_service import transcribe_audio
+from backend.emotion_service import detect_emotion
 
 app = FastAPI(title="Auralis API")
 
@@ -26,10 +27,13 @@ async def upload_audio(file: UploadFile = File(...)):
         buffer.write(await file.read())
 
     result = transcribe_audio(file_path)
+    emotion = detect_emotion(file_path)
 
     return {
         "filename": file.filename,
         "content_type": file.content_type,
         "transcription": result["text"],
-        "language": result["language"]
+        "language": result["language"],
+        "emotion": emotion["emotion"],
+        "emotion_confidence": emotion["confidence"]
     }
