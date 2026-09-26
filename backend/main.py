@@ -1,7 +1,11 @@
+import os
+
 from fastapi import FastAPI
 from fastapi import UploadFile, File
+
 from backend.whisper_service import transcribe_audio
 from backend.emotion_service import detect_emotion
+
 
 app = FastAPI(title="Auralis API")
 
@@ -19,21 +23,32 @@ def health():
         "status": "healthy"
     }
 
+
 @app.post("/api/audio")
 async def upload_audio(file: UploadFile = File(...)):
     file_path = f"temp_{file.filename}"
 
-    with open(file_path, "wb") as buffer:
-        buffer.write(await file.read())
+    try:
+        # Save uploaded audio file temporarily
+        with open(file_path, "wb") as buffer:
+            buffer.write(await file.read())
 
-    result = transcribe_audio(file_path)
-    emotion = detect_emotion(file_path)
+        # Speech-to-text
+        result = transcribe_audio(file_path)
 
-    return {
-        "filename": file.filename,
-        "content_type": file.content_type,
-        "transcription": result["text"],
-        "language": result["language"],
-        "emotion": emotion["emotion"],
-        "emotion_confidence": emotion["confidence"]
-    }
+        # Emotion detection
+        emotion = detect_emotion(file_path)
+
+        return {
+            "filename": file.filename,
+            "content_type": file.content_type,
+            "transcription": result["text"],
+            "language": result["language"],
+            "emotion": emotion["emotion"],
+            "emotion_confidence": emotion["confidence"]
+        }
+
+    finally:
+        # Delete temporary file after processing
+        if os.path.exists(file_path):
+            os.remove(file_path)
