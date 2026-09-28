@@ -1,5 +1,5 @@
 import os
-
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
 from fastapi import UploadFile, File
 
@@ -9,6 +9,13 @@ from backend.emotion_service import detect_emotion
 
 app = FastAPI(title="Auralis API")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 def home():
