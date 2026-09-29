@@ -1,7 +1,9 @@
+
 import os
+import tempfile
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI
-from fastapi import UploadFile, File
 
 from backend.whisper_service import transcribe_audio
 from backend.emotion_service import detect_emotion
@@ -16,6 +18,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.get("/")
 def home():
@@ -33,12 +36,33 @@ def health():
 
 @app.post("/api/audio")
 async def upload_audio(file: UploadFile = File(...)):
-    file_path = f"temp_{file.filename}"
+    file_path = None
 
     try:
-        # Save uploaded audio file temporarily
-        with open(file_path, "wb") as buffer:
-            buffer.write(await file.read())
+        # Read uploaded audio
+        audio_data = await file.read()
+
+        # Validate empty file
+        if not audio_data:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded audio file is empty"
+            )
+
+        # Get safe filename and preserve extension
+        filename = os.path.basename(
+            (file.filename or "audio_upload").replace("\\", "/")
+        )
+        extension = os.path.splitext(filename)[1]
+
+        # Create a unique temporary file
+        with tempfile.NamedTemporaryFile(
+            prefix="auralis_",
+            suffix=extension,
+            delete=False
+        ) as temp_file:
+            file_path = temp_file.name
+            temp_file.write(audio_data)
 
         # Speech-to-text
         result = transcribe_audio(file_path)
@@ -47,7 +71,7 @@ async def upload_audio(file: UploadFile = File(...)):
         emotion = detect_emotion(file_path)
 
         return {
-            "filename": file.filename,
+            "filename": filename,
             "content_type": file.content_type,
             "transcription": result["text"],
             "language": result["language"],
@@ -55,7 +79,19 @@ async def upload_audio(file: UploadFile = File(...)):
             "emotion_confidence": emotion["confidence"]
         }
 
+    except HTTPException:
+        raise
+
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Audio processing failed. Please upload a valid audio file."
+        )
+
     finally:
-        # Delete temporary file after processing
-        if os.path.exists(file_path):
+        # Remove temporary audio file
+        if file_path and os.path.exists(file_path):
             os.remove(file_path)
+
+        # Close uploaded file
+        await file.close()
