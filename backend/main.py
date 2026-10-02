@@ -2,7 +2,7 @@
 import os
 import tempfile
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.whisper_service import transcribe_audio
@@ -95,3 +95,22 @@ async def upload_audio(file: UploadFile = File(...)):
 
         # Close uploaded file
         await file.close()
+
+@app.websocket("/ws/audio")
+async def audio_stream(websocket: WebSocket):
+    await websocket.accept()
+    print("WebSocket connection established")
+
+    try:
+        while True:
+            audio_chunk = await websocket.receive_bytes()
+
+            print(f"Received audio chunk: {len(audio_chunk)} bytes")
+
+            await websocket.send_json({
+                "status": "received",
+                "chunk_size": len(audio_chunk)
+            })
+
+    except WebSocketDisconnect:
+        print("WebSocket connection closed")
