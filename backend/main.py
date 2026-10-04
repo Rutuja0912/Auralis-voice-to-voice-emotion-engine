@@ -1,4 +1,5 @@
-
+import json
+from starlette.concurrency import run_in_threadpool
 import os
 import tempfile
 
@@ -101,16 +102,78 @@ async def audio_stream(websocket: WebSocket):
     await websocket.accept()
     print("WebSocket connection established")
 
-    try:
-        while True:
-            audio_chunk = await websocket.receive_bytes()
+    file_path = None
 
-            print(f"Received audio chunk: {len(audio_chunk)} bytes")
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="auralis_stream_",
+            suffix=".webm",
+            delete=False
+        ) as temp_file:
+            file_path = temp_file.name
+
+            while True:
+                message = await websocket.receive()
+
+                if message.get("type") == "websocket.disconnect":
+                    break
+
+                audio_chunk = message.get("bytes")
+
+                if audio_chunk:
+                    temp_file.write(audio_chunk)
+
+                    await websocket.send_json({
+                        "status": "received",
+                        "chunk_size": len(audio_chunk)
+                    })
+
+                elif message.get("text"):
+                    try:
+                        command = json.loads(message["text"])
+                    except json.JSONDecodeError:
+                        continue
+
+                    if command.get("type") == "end":
+                        break
+
+        if file_path and os.path.getsize(file_path) > 0:
+            await websocket.send_json({
+                "status": "processing"
+            })
+
+            result = await run_in_threadpool(
+                transcribe_audio,
+                file_path
+            )
 
             await websocket.send_json({
-                "status": "received",
-                "chunk_size": len(audio_chunk)
+                "status": "transcription",
+                "transcription": result["text"],
+                "language": result["language"]
+            })
+        else:
+            await websocket.send_json({
+                "status": "error",
+                "message": "No audio received"
             })
 
     except WebSocketDisconnect:
         print("WebSocket connection closed")
+
+    except Exception as e:
+        print(f"WebSocket audio processing failed: {e}")
+        try:
+            await websocket.send_json({
+                "status": "error",
+                "message": "Audio processing failed"
+            })
+        except Exception:
+            pass
+
+    finally:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+
+        if websocket.client_state.name == "CONNECTED":
+            await websocket.close()

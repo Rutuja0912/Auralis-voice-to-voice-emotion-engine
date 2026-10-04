@@ -10,6 +10,7 @@ function App() {
 
   const [wsStatus, setWsStatus] = useState("Disconnected");
   const [chunksSent, setChunksSent] = useState(0);
+  const [wsTranscription, setWsTranscription] = useState("");
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -21,6 +22,8 @@ function App() {
     try {
       setError("");
       setResult(null);
+      setWsTranscription("");
+      setAudioUrl(null);
       setChunksSent(0);
       setWsStatus("Connecting");
 
@@ -36,21 +39,44 @@ function App() {
 
       websocketRef.current = websocket;
 
-      // Handle incoming chunk acknowledgments
+      // Handle WebSocket messages
       websocket.onmessage = (event) => {
         try {
-          const ack = JSON.parse(event.data);
+          const message = JSON.parse(event.data);
 
-          if (ack.status === "received") {
+          if (message.status === "received") {
             setChunksSent((prev) => prev + 1);
+          } else if (message.status === "processing") {
+            setWsStatus("Processing");
+          } else if (message.status === "transcription") {
+            setWsTranscription(message.transcription || "");
+            setWsStatus("Transcription received");
+          } else if (message.status === "error") {
+            setError(
+              message.message || "WebSocket processing failed"
+            );
+            setWsStatus("Error");
           }
         } catch (err) {
           console.error("Invalid WebSocket message:", err);
         }
       };
 
+      websocket.onerror = () => {
+        setError("WebSocket connection or streaming failed.");
+        setWsStatus("Error");
+      };
+
       websocket.onclose = () => {
-        setWsStatus("Disconnected");
+        setWsStatus((prev) =>
+          prev === "Transcription received" || prev === "Error"
+            ? prev
+            : "Disconnected"
+        );
+
+        if (websocketRef.current === websocket) {
+          websocketRef.current = null;
+        }
       };
 
       // Wait until WebSocket connects
@@ -66,7 +92,7 @@ function App() {
 
         websocket.onclose = () => {
           setWsStatus("Disconnected");
-          reject(new Error("WebSocket disconnected"));
+          reject(new Error("WebSocket disconnected before connecting"));
         };
       });
 
@@ -82,15 +108,13 @@ function App() {
           audioChunksRef.current.push(event.data);
 
           // Send each chunk over WebSocket
-          if (
-            websocketRef.current?.readyState === WebSocket.OPEN
-          ) {
-            websocketRef.current.send(event.data);
+          if (websocket.readyState === WebSocket.OPEN) {
+            websocket.send(event.data);
           }
         }
       };
 
-      // When recording stops, upload complete audio for analysis
+      // When recording stops, send end signal and upload full audio
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, {
           type: mediaRecorder.mimeType || "audio/webm",
@@ -99,8 +123,16 @@ function App() {
         const url = URL.createObjectURL(audioBlob);
         setAudioUrl(url);
 
+        // Stop microphone tracks
         stream.getTracks().forEach((track) => track.stop());
 
+        // Tell WebSocket backend that audio streaming has ended
+        if (websocket.readyState === WebSocket.OPEN) {
+          websocket.send(JSON.stringify({ type: "end" }));
+          setWsStatus("Processing");
+        }
+
+        // Keep REST analysis flow for emotion detection
         const formData = new FormData();
         formData.append("file", audioBlob, "recording.webm");
 
@@ -127,17 +159,10 @@ function App() {
           );
         } finally {
           setLoading(false);
-
-          // Close WebSocket after final upload
-          if (
-            websocketRef.current &&
-            websocketRef.current.readyState < WebSocket.CLOSING
-          ) {
-            websocketRef.current.close();
-          }
-
-          websocketRef.current = null;
         }
+
+        // Do not close WebSocket here.
+        // Backend will send transcription and close the connection.
       };
 
       // Emit audio chunks approximately every second
@@ -158,7 +183,7 @@ function App() {
         stream.getTracks().forEach((track) => track.stop());
       }
 
-      // Close WebSocket if connection setup failed
+      // Close WebSocket if setup failed
       if (
         websocketRef.current &&
         websocketRef.current.readyState < WebSocket.CLOSING
@@ -196,7 +221,10 @@ function App() {
           <span
             style={{
               color:
-                wsStatus === "Connected" ? "#61dafb" : "#ffb86c",
+                wsStatus === "Connected" ||
+                wsStatus === "Transcription received"
+                  ? "#61dafb"
+                  : "#ffb86c",
             }}
           >
             {wsStatus}
@@ -235,9 +263,16 @@ function App() {
 
         {error && <p style={styles.error}>{error}</p>}
 
+        {wsTranscription && (
+          <div style={styles.result}>
+            <h2>WebSocket Transcription</h2>
+            <p>{wsTranscription}</p>
+          </div>
+        )}
+
         {result && (
           <div style={styles.result}>
-            <h2>Analysis Result</h2>
+            <h2>Analysis Result (REST API)</h2>
 
             <p>
               <strong>Transcription:</strong>
