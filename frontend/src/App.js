@@ -1,4 +1,3 @@
-
 import { useRef, useState } from "react";
 
 function App() {
@@ -92,7 +91,9 @@ function App() {
 
         websocket.onclose = () => {
           setWsStatus("Disconnected");
-          reject(new Error("WebSocket disconnected before connecting"));
+          reject(
+            new Error("WebSocket disconnected before connecting")
+          );
         };
       });
 
@@ -132,7 +133,7 @@ function App() {
           setWsStatus("Processing");
         }
 
-        // Keep REST analysis flow for emotion detection
+        // REST analysis flow for emotion detection
         const formData = new FormData();
         formData.append("file", audioBlob, "recording.webm");
 
@@ -152,6 +153,7 @@ function App() {
           }
 
           const data = await response.json();
+          console.log("REST API RESULT:", data);
           setResult(data);
         } catch (err) {
           setError(
@@ -204,8 +206,11 @@ function App() {
 
   return (
     <div style={styles.container}>
-      <h1>Auralis</h1>
-      <p>Real-Time Voice-to-Voice Emotion Engine</p>
+      <h1 style={styles.title}>Auralis</h1>
+
+      <p style={styles.subtitle}>
+        Real-Time Voice-to-Voice Emotion Engine
+      </p>
 
       <div style={styles.card}>
         <h2>Voice Input</h2>
@@ -216,6 +221,7 @@ function App() {
             : "Click the button to start recording"}
         </p>
 
+        {/* WebSocket Status */}
         <p>
           <strong>WebSocket Status:</strong>{" "}
           <span
@@ -224,6 +230,8 @@ function App() {
                 wsStatus === "Connected" ||
                 wsStatus === "Transcription received"
                   ? "#61dafb"
+                  : wsStatus === "Error"
+                  ? "#ff6b6b"
                   : "#ffb86c",
             }}
           >
@@ -231,10 +239,12 @@ function App() {
           </span>
         </p>
 
+        {/* Audio Chunks */}
         <p>
           <strong>Audio Chunks Received:</strong> {chunksSent}
         </p>
 
+        {/* Recording Buttons */}
         {!recording ? (
           <button
             style={styles.button}
@@ -252,47 +262,87 @@ function App() {
           </button>
         )}
 
+        {/* Recorded Audio */}
         {audioUrl && (
-          <div style={{ marginTop: "25px" }}>
-            <p>Recorded Audio:</p>
+          <div style={styles.audioSection}>
+            <p>
+              <strong>Recorded Audio</strong>
+            </p>
+
             <audio controls src={audioUrl} />
           </div>
         )}
 
-        {loading && <p>⏳ Processing audio, please wait...</p>}
+        {/* Loading */}
+        {loading && (
+          <p style={styles.loading}>
+            ⏳ Processing audio, please wait...
+          </p>
+        )}
 
+        {/* Error */}
         {error && <p style={styles.error}>{error}</p>}
 
+        {/* WebSocket Transcription */}
         {wsTranscription && (
           <div style={styles.result}>
-            <h2>WebSocket Transcription</h2>
+            <h2>📝 WebSocket Transcription</h2>
+
             <p>{wsTranscription}</p>
           </div>
         )}
 
+        {/* REST Analysis Result */}
         {result && (
-          <div style={styles.result}>
-            <h2>Analysis Result (REST API)</h2>
+          <div style={styles.analysisCard}>
+            <h2>🎯 Emotion Analysis</h2>
 
-            <p>
-              <strong>Transcription:</strong>
-            </p>
-            <p>{result.transcription || "No speech detected"}</p>
+            {/* Transcription */}
+            <div style={styles.resultItem}>
+              <strong>Transcription</strong>
+              <p>
+                {result.transcription || "No speech detected"}
+              </p>
+            </div>
 
-            <p>
-              <strong>Language:</strong>{" "}
-              {result.language || "Unknown"}
-            </p>
+            {/* Language */}
+            <div style={styles.resultItem}>
+              <strong>Language</strong>
+              <p>{result.language || "Unknown"}</p>
+            </div>
 
-            <p>
-              <strong>Emotion:</strong>{" "}
-              {result.emotion || "Unknown"}
-            </p>
+            {/* Emotion */}
+            <div style={styles.emotionBox}>
+              <span style={styles.emotionIcon}>🎭</span>
 
-            <p>
-              <strong>Emotion Confidence:</strong>{" "}
-              {result.emotion_confidence ?? "N/A"}
-            </p>
+              <div>
+                <strong>Detected Emotion</strong>
+
+                <p style={styles.emotionText}>
+                  {result.emotion || "Unknown"}
+                </p>
+              </div>
+            </div>
+
+            {/* Confidence */}
+            <div style={styles.confidenceBox}>
+              <strong>Emotion Confidence</strong>
+
+              <p style={styles.confidenceText}>
+                {result.confidence != null
+                  ? `${(result.confidence * 100).toFixed(2)}%`
+                  : "N/A"}
+              </p>
+            </div>
+
+            {/* Raw Model Label */}
+            <div style={styles.resultItem}>
+              <strong>Raw Emotion Label</strong>
+
+              <p>
+                {result.raw_emotion || "N/A"}
+              </p>
+            </div>
           </div>
         )}
       </div>
@@ -309,7 +359,18 @@ const styles = {
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    fontFamily: "Arial",
+    fontFamily: "Arial, sans-serif",
+    padding: "20px",
+  },
+
+  title: {
+    marginBottom: "5px",
+  },
+
+  subtitle: {
+    color: "#b8c1cc",
+    marginTop: "0",
+    marginBottom: "25px",
   },
 
   card: {
@@ -317,8 +378,10 @@ const styles = {
     padding: "40px",
     borderRadius: "15px",
     textAlign: "center",
-    width: "400px",
-    maxWidth: "90%",
+    width: "450px",
+    maxWidth: "95%",
+    boxSizing: "border-box",
+    boxShadow: "0 8px 25px rgba(0, 0, 0, 0.3)",
   },
 
   button: {
@@ -326,6 +389,8 @@ const styles = {
     border: "none",
     borderRadius: "8px",
     backgroundColor: "#61dafb",
+    color: "#20232a",
+    fontWeight: "bold",
     fontSize: "16px",
     cursor: "pointer",
   },
@@ -337,16 +402,77 @@ const styles = {
     backgroundColor: "#ff4d4d",
     color: "white",
     fontSize: "16px",
+    fontWeight: "bold",
     cursor: "pointer",
+  },
+
+  audioSection: {
+    marginTop: "25px",
+  },
+
+  loading: {
+    color: "#61dafb",
+    marginTop: "20px",
   },
 
   result: {
     marginTop: "25px",
-    padding: "15px",
+    padding: "18px",
     backgroundColor: "#20232a",
     borderRadius: "10px",
     textAlign: "left",
     overflowWrap: "anywhere",
+  },
+
+  analysisCard: {
+    marginTop: "25px",
+    padding: "20px",
+    backgroundColor: "#20232a",
+    borderRadius: "12px",
+    textAlign: "left",
+    border: "1px solid #3d4350",
+  },
+
+  resultItem: {
+    marginTop: "15px",
+    padding: "12px",
+    backgroundColor: "#282c34",
+    borderRadius: "8px",
+    overflowWrap: "anywhere",
+  },
+
+  emotionBox: {
+    marginTop: "15px",
+    padding: "15px",
+    backgroundColor: "#282c34",
+    borderRadius: "10px",
+    display: "flex",
+    alignItems: "center",
+    gap: "15px",
+  },
+
+  emotionIcon: {
+    fontSize: "32px",
+  },
+
+  emotionText: {
+    fontSize: "22px",
+    fontWeight: "bold",
+    margin: "5px 0 0 0",
+  },
+
+  confidenceBox: {
+    marginTop: "15px",
+    padding: "15px",
+    backgroundColor: "#282c34",
+    borderRadius: "10px",
+  },
+
+  confidenceText: {
+    fontSize: "22px",
+    fontWeight: "bold",
+    color: "#61dafb",
+    margin: "8px 0 0 0",
   },
 
   error: {

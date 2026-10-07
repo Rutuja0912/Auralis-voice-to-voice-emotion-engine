@@ -70,14 +70,16 @@ async def upload_audio(file: UploadFile = File(...)):
 
         # Emotion detection
         emotion = detect_emotion(file_path)
+        print("DEBUG EMOTION:", emotion)
 
         return {
             "filename": filename,
             "content_type": file.content_type,
             "transcription": result["text"],
             "language": result["language"],
+            "confidence": emotion["confidence"],
             "emotion": emotion["emotion"],
-            "emotion_confidence": emotion["confidence"]
+            "raw_emotion": emotion["raw_emotion"]
         }
 
     except HTTPException:

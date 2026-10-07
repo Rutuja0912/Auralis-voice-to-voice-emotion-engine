@@ -18,7 +18,7 @@ def detect_emotion(file_path):
 
     best_result = max(results, key=lambda x: x["score"])
 
-    raw_emotion = best_result["label"]
+    raw_emotion = str(best_result["label"]).strip().lower()
     emotion = EMOTION_LABELS.get(raw_emotion, raw_emotion)
 
     return {
