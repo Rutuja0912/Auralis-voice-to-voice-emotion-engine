@@ -3,14 +3,23 @@ from starlette.concurrency import run_in_threadpool
 import os
 import tempfile
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    UploadFile,
+    File,
+    HTTPException,
+    WebSocket,
+    WebSocketDisconnect
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.whisper_service import transcribe_audio
 from backend.emotion_service import detect_emotion
+from backend.llm_service import generate_response
 
 
 app = FastAPI(title="Auralis API")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -70,7 +79,16 @@ async def upload_audio(file: UploadFile = File(...)):
 
         # Emotion detection
         emotion = detect_emotion(file_path)
+
         print("DEBUG EMOTION:", emotion)
+
+        # LLM Context Engine
+        llm_response = generate_response(
+            result["text"],
+            emotion["emotion"]
+        )
+
+        print("DEBUG LLM RESPONSE:", llm_response)
 
         return {
             "filename": filename,
@@ -79,13 +97,16 @@ async def upload_audio(file: UploadFile = File(...)):
             "language": result["language"],
             "confidence": emotion["confidence"],
             "emotion": emotion["emotion"],
-            "raw_emotion": emotion["raw_emotion"]
+            "raw_emotion": emotion["raw_emotion"],
+            "llm_response": llm_response
         }
 
     except HTTPException:
         raise
 
-    except Exception:
+    except Exception as e:
+        print("Audio processing error:", e)
+
         raise HTTPException(
             status_code=500,
             detail="Audio processing failed. Please upload a valid audio file."
@@ -99,9 +120,11 @@ async def upload_audio(file: UploadFile = File(...)):
         # Close uploaded file
         await file.close()
 
+
 @app.websocket("/ws/audio")
 async def audio_stream(websocket: WebSocket):
     await websocket.accept()
+
     print("WebSocket connection established")
 
     file_path = None
@@ -112,6 +135,7 @@ async def audio_stream(websocket: WebSocket):
             suffix=".webm",
             delete=False
         ) as temp_file:
+
             file_path = temp_file.name
 
             while True:
@@ -131,8 +155,10 @@ async def audio_stream(websocket: WebSocket):
                     })
 
                 elif message.get("text"):
+
                     try:
                         command = json.loads(message["text"])
+
                     except json.JSONDecodeError:
                         continue
 
@@ -140,40 +166,69 @@ async def audio_stream(websocket: WebSocket):
                         break
 
         if file_path and os.path.getsize(file_path) > 0:
+
             await websocket.send_json({
                 "status": "processing"
             })
 
+            # Speech-to-text
             result = await run_in_threadpool(
                 transcribe_audio,
                 file_path
             )
 
+            # Emotion detection
+            emotion = await run_in_threadpool(
+                detect_emotion,
+                file_path
+            )
+
+            # LLM Context Engine
+            llm_response = await run_in_threadpool(
+                generate_response,
+                result["text"],
+                emotion["emotion"]
+            )
+
+            print("DEBUG EMOTION:", emotion)
+            print("DEBUG LLM RESPONSE:", llm_response)
+
             await websocket.send_json({
-                "status": "transcription",
+                "status": "analysis",
                 "transcription": result["text"],
-                "language": result["language"]
+                "language": result["language"],
+                "emotion": emotion["emotion"],
+                "confidence": emotion["confidence"],
+                "raw_emotion": emotion["raw_emotion"],
+                "llm_response": llm_response
             })
+
         else:
+
             await websocket.send_json({
                 "status": "error",
                 "message": "No audio received"
             })
 
     except WebSocketDisconnect:
+
         print("WebSocket connection closed")
 
     except Exception as e:
+
         print(f"WebSocket audio processing failed: {e}")
+
         try:
             await websocket.send_json({
                 "status": "error",
                 "message": "Audio processing failed"
             })
+
         except Exception:
             pass
 
     finally:
+
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
 

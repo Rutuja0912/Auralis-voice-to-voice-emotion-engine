@@ -292,6 +292,14 @@ function App() {
           </div>
         )}
 
+        {/* Auralis AI Response */}
+        {result?.llm_response && (
+          <div style={styles.result}>
+            <h2>🧠 Auralis Response</h2>
+            <p>{result.llm_response}</p>
+          </div>
+        )}
+
         {/* REST Analysis Result */}
         {result && (
           <div style={styles.analysisCard}>
