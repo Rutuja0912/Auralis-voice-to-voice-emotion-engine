@@ -62,6 +62,10 @@ def detect_emotion(file_path):
             mono=True
         )
 
+        print("DEBUG SAMPLE RATE:", sample_rate)
+        print("DEBUG AUDIO PEAK:", float(max(abs(audio))) if len(audio) else 0.0)
+
+
         # Normalize volume
         max_value = max(abs(audio))
 
