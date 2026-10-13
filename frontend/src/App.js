@@ -17,6 +17,7 @@ function App() {
 
   const startRecording = async () => {
     let stream;
+    let websocket;
 
     try {
       setError("");
@@ -32,10 +33,7 @@ function App() {
       });
 
       // Create WebSocket connection
-      const websocket = new WebSocket(
-        "ws://127.0.0.1:8000/ws/audio"
-      );
-
+      websocket = new WebSocket("ws://127.0.0.1:8000/ws/audio");
       websocketRef.current = websocket;
 
       // Handle WebSocket messages
@@ -47,9 +45,25 @@ function App() {
             setChunksSent((prev) => prev + 1);
           } else if (message.status === "processing") {
             setWsStatus("Processing");
-          } else if (message.status === "transcription") {
-            setWsTranscription(message.transcription || "");
+          } else if (
+            message.status === "analysis" ||
+            message.status === "transcription"
+          ) {
+            const analysisResult = {
+              transcription: message.transcription || "",
+              language: message.language || "Unknown",
+              emotion: message.emotion || "Unknown",
+              confidence: message.confidence ?? null,
+              raw_emotion: message.raw_emotion || "N/A",
+              llm_response: message.llm_response || "",
+            };
+
+            setWsTranscription(analysisResult.transcription);
+            setResult(analysisResult);
             setWsStatus("Transcription received");
+            setError("");
+
+            console.log("WEBSOCKET ANALYSIS RESULT:", message);
           } else if (message.status === "error") {
             setError(
               message.message || "WebSocket processing failed"
@@ -58,6 +72,8 @@ function App() {
           }
         } catch (err) {
           console.error("Invalid WebSocket message:", err);
+          setError("Received an invalid WebSocket message.");
+          setWsStatus("Error");
         }
       };
 
@@ -67,34 +83,45 @@ function App() {
       };
 
       websocket.onclose = () => {
+        if (websocketRef.current === websocket) {
+          websocketRef.current = null;
+        }
+
         setWsStatus((prev) =>
           prev === "Transcription received" || prev === "Error"
             ? prev
             : "Disconnected"
         );
-
-        if (websocketRef.current === websocket) {
-          websocketRef.current = null;
-        }
       };
 
       // Wait until WebSocket connects
       await new Promise((resolve, reject) => {
-        websocket.onopen = () => {
+        const handleOpen = () => {
           setWsStatus("Connected");
           resolve();
         };
 
-        websocket.onerror = () => {
-          reject(new Error("WebSocket connection failed"));
-        };
-
-        websocket.onclose = () => {
-          setWsStatus("Disconnected");
+        const handleClose = () => {
           reject(
             new Error("WebSocket disconnected before connecting")
           );
         };
+
+        const handleError = () => {
+          reject(new Error("WebSocket connection failed"));
+        };
+
+        websocket.addEventListener("open", handleOpen, {
+          once: true,
+        });
+
+        websocket.addEventListener("close", handleClose, {
+          once: true,
+        });
+
+        websocket.addEventListener("error", handleError, {
+          once: true,
+        });
       });
 
       // Create MediaRecorder
@@ -108,14 +135,14 @@ function App() {
           // Keep chunks for final REST upload
           audioChunksRef.current.push(event.data);
 
-          // Send each chunk over WebSocket
+          // Send audio chunks over WebSocket
           if (websocket.readyState === WebSocket.OPEN) {
             websocket.send(event.data);
           }
         }
       };
 
-      // When recording stops, send end signal and upload full audio
+      // Process audio when recording stops
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, {
           type: mediaRecorder.mimeType || "audio/webm",
@@ -127,13 +154,14 @@ function App() {
         // Stop microphone tracks
         stream.getTracks().forEach((track) => track.stop());
 
-        // Tell WebSocket backend that audio streaming has ended
+        // Tell backend that streaming has ended
         if (websocket.readyState === WebSocket.OPEN) {
           websocket.send(JSON.stringify({ type: "end" }));
           setWsStatus("Processing");
         }
 
-        // REST analysis flow for emotion detection
+        // REST API analysis flow
+        // This is retained alongside WebSocket processing.
         const formData = new FormData();
         formData.append("file", audioBlob, "recording.webm");
 
@@ -153,9 +181,11 @@ function App() {
           }
 
           const data = await response.json();
+
           console.log("REST API RESULT:", data);
           setResult(data);
         } catch (err) {
+          console.error("REST API error:", err);
           setError(
             err.message || "Audio upload failed. Please try again."
           );
@@ -163,8 +193,8 @@ function App() {
           setLoading(false);
         }
 
-        // Do not close WebSocket here.
-        // Backend will send transcription and close the connection.
+        // Do not close the WebSocket here.
+        // Backend sends the final analysis and closes it.
       };
 
       // Emit audio chunks approximately every second
@@ -187,10 +217,10 @@ function App() {
 
       // Close WebSocket if setup failed
       if (
-        websocketRef.current &&
-        websocketRef.current.readyState < WebSocket.CLOSING
+        websocket &&
+        websocket.readyState < WebSocket.CLOSING
       ) {
-        websocketRef.current.close();
+        websocket.close();
       }
 
       websocketRef.current = null;
@@ -287,7 +317,6 @@ function App() {
         {wsTranscription && (
           <div style={styles.result}>
             <h2>📝 WebSocket Transcription</h2>
-
             <p>{wsTranscription}</p>
           </div>
         )}
@@ -300,7 +329,7 @@ function App() {
           </div>
         )}
 
-        {/* REST Analysis Result */}
+        {/* Emotion Analysis */}
         {result && (
           <div style={styles.analysisCard}>
             <h2>🎯 Emotion Analysis</h2>
@@ -308,9 +337,7 @@ function App() {
             {/* Transcription */}
             <div style={styles.resultItem}>
               <strong>Transcription</strong>
-              <p>
-                {result.transcription || "No speech detected"}
-              </p>
+              <p>{result.transcription || "No speech detected"}</p>
             </div>
 
             {/* Language */}
@@ -325,7 +352,6 @@ function App() {
 
               <div>
                 <strong>Detected Emotion</strong>
-
                 <p style={styles.emotionText}>
                   {result.emotion || "Unknown"}
                 </p>
@@ -346,10 +372,7 @@ function App() {
             {/* Raw Model Label */}
             <div style={styles.resultItem}>
               <strong>Raw Emotion Label</strong>
-
-              <p>
-                {result.raw_emotion || "N/A"}
-              </p>
+              <p>{result.raw_emotion || "N/A"}</p>
             </div>
           </div>
         )}
