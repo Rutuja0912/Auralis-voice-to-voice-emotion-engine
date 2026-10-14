@@ -23,9 +23,15 @@ function App() {
       setError("");
       setResult(null);
       setWsTranscription("");
-      setAudioUrl(null);
       setChunksSent(0);
+      setLoading(false);
+      setRecording(false);
       setWsStatus("Connecting");
+
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+        setAudioUrl(null);
+      }
 
       // Request microphone access
       stream = await navigator.mediaDevices.getUserMedia({
@@ -44,6 +50,7 @@ function App() {
           if (message.status === "received") {
             setChunksSent((prev) => prev + 1);
           } else if (message.status === "processing") {
+            setLoading(true);
             setWsStatus("Processing");
           } else if (
             message.status === "analysis" ||
@@ -62,24 +69,28 @@ function App() {
             setResult(analysisResult);
             setWsStatus("Transcription received");
             setError("");
+            setLoading(false);
 
             console.log("WEBSOCKET ANALYSIS RESULT:", message);
           } else if (message.status === "error") {
             setError(
-              message.message || "WebSocket processing failed"
+              message.message || "WebSocket processing failed."
             );
             setWsStatus("Error");
+            setLoading(false);
           }
         } catch (err) {
           console.error("Invalid WebSocket message:", err);
           setError("Received an invalid WebSocket message.");
           setWsStatus("Error");
+          setLoading(false);
         }
       };
 
       websocket.onerror = () => {
         setError("WebSocket connection or streaming failed.");
         setWsStatus("Error");
+        setLoading(false);
       };
 
       websocket.onclose = () => {
@@ -92,6 +103,8 @@ function App() {
             ? prev
             : "Disconnected"
         );
+
+        setLoading(false);
       };
 
       // Wait until WebSocket connects
@@ -103,12 +116,12 @@ function App() {
 
         const handleClose = () => {
           reject(
-            new Error("WebSocket disconnected before connecting")
+            new Error("WebSocket disconnected before connecting.")
           );
         };
 
         const handleError = () => {
-          reject(new Error("WebSocket connection failed"));
+          reject(new Error("WebSocket connection failed."));
         };
 
         websocket.addEventListener("open", handleOpen, {
@@ -132,10 +145,10 @@ function App() {
       // Receive and send audio chunks
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
-          // Keep chunks for final REST upload
+          // Keep chunks for recorded audio playback
           audioChunksRef.current.push(event.data);
 
-          // Send audio chunks over WebSocket
+          // Send audio chunks through WebSocket only
           if (websocket.readyState === WebSocket.OPEN) {
             websocket.send(event.data);
           }
@@ -143,7 +156,7 @@ function App() {
       };
 
       // Process audio when recording stops
-      mediaRecorder.onstop = async () => {
+      mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, {
           type: mediaRecorder.mimeType || "audio/webm",
         });
@@ -154,47 +167,24 @@ function App() {
         // Stop microphone tracks
         stream.getTracks().forEach((track) => track.stop());
 
-        // Tell backend that streaming has ended
+        // WebSocket is the single audio analysis flow
         if (websocket.readyState === WebSocket.OPEN) {
-          websocket.send(JSON.stringify({ type: "end" }));
+          setLoading(true);
+          setError("");
           setWsStatus("Processing");
-        }
 
-        // REST API analysis flow
-        // This is retained alongside WebSocket processing.
-        const formData = new FormData();
-        formData.append("file", audioBlob, "recording.webm");
-
-        setLoading(true);
-
-        try {
-          const response = await fetch(
-            "http://127.0.0.1:8000/api/audio",
-            {
-              method: "POST",
-              body: formData,
-            }
-          );
-
-          if (!response.ok) {
-            throw new Error(`Server error: ${response.status}`);
-          }
-
-          const data = await response.json();
-
-          console.log("REST API RESULT:", data);
-          setResult(data);
-        } catch (err) {
-          console.error("REST API error:", err);
-          setError(
-            err.message || "Audio upload failed. Please try again."
-          );
-        } finally {
+          // Send only one end signal
+          websocket.send(JSON.stringify({ type: "end" }));
+        } else {
           setLoading(false);
+          setError(
+            "WebSocket disconnected. Please try recording again."
+          );
+          setWsStatus("Disconnected");
         }
 
-        // Do not close the WebSocket here.
-        // Backend sends the final analysis and closes it.
+        // No REST upload here.
+        // The final result is received through WebSocket.
       };
 
       // Emit audio chunks approximately every second
@@ -209,6 +199,8 @@ function App() {
       );
 
       setWsStatus("Disconnected");
+      setLoading(false);
+      setRecording(false);
 
       // Stop microphone if setup failed
       if (stream) {
@@ -402,6 +394,7 @@ const styles = {
     color: "#b8c1cc",
     marginTop: "0",
     marginBottom: "25px",
+    textAlign: "center",
   },
 
   card: {
@@ -509,6 +502,7 @@ const styles = {
   error: {
     color: "#ff8080",
     marginTop: "20px",
+    overflowWrap: "anywhere",
   },
 };
 
